@@ -1,0 +1,7 @@
+{
+  "name": "SmartStock Beauty Tracker",
+  "description": "A comprehensive inventory and sales management system for beauty products, featuring real-time stock tracking, sales analytics, and customer management.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
