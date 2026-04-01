@@ -5,6 +5,7 @@ import { LogIn, UserPlus, Mail, Lock, Chrome } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export const LoginForm: React.FC = () => {
+  console.log('LoginForm rendering...');
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

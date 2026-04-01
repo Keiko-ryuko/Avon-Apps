@@ -52,6 +52,8 @@ import {
   Pie
 } from 'recharts';
 import { GoogleGenAI } from "@google/genai";
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 import { api } from './services/api';
 import { Product, Customer, Sale, DashboardData, Notification, User, PerformanceReport, SocialPost } from './types';
 import { useAuth } from './components/auth/FirebaseProvider';
@@ -59,9 +61,9 @@ import { LoginForm } from './components/auth/LoginForm';
 import { auth } from './lib/firebase';
 import { fileToBase64 } from './lib/utils';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+const getGenAI = () => {
+  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'DUMMY_KEY' });
+};
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -133,7 +135,7 @@ const SocialShareModal = ({ product, isOpen, onClose }: { product: Product; isOp
       Vibe: ${vibe}
       Keep it short, use emojis, and include a call to action.`;
 
-      const response = await ai.models.generateContent({
+      const response = await getGenAI().models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
       });
@@ -1475,6 +1477,7 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
 // --- Main App ---
 
 export default function App() {
+  console.log('App component rendering...');
   const { user, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'sales' | 'customers' | 'reports' | 'social'>('dashboard');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);

@@ -1,6 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const getGenAI = () => {
+  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'DUMMY_KEY' });
+};
 
 export const gemini = {
   generateCaption: async (productName: string, brand: string, price: number, type: 'new_arrival' | 'low_stock') => {
@@ -11,7 +13,7 @@ export const gemini = {
     Type: ${type === 'new_arrival' ? 'New Arrival' : 'Running Low/Urgent'}
     Include emojis and a call to action. Keep it under 200 characters.`;
 
-    const response = await ai.models.generateContent({
+    const response = await getGenAI().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
     });
