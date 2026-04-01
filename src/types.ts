@@ -1,7 +1,7 @@
 export interface Product {
   id: number;
   name: string;
-  brand: 'Avon' | 'Inuka';
+  brand: 'Avon' | 'Inuka' | 'Avroy Shlain';
   category: string;
   quantity: number;
   buying_price: number;
@@ -12,6 +12,18 @@ export interface Product {
   arrival_date: string;
   image_url: string;
   low_stock_threshold: number;
+}
+
+export interface SocialPost {
+  id: number;
+  product_id: number;
+  product_name?: string;
+  product_brand?: string;
+  platform: string;
+  caption: string;
+  scheduled_at: string | null;
+  status: 'posted' | 'scheduled';
+  created_at: string;
 }
 
 export interface Customer {

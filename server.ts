@@ -17,7 +17,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    brand TEXT CHECK(brand IN ('Avon', 'Inuka')),
+    brand TEXT,
     category TEXT,
     quantity INTEGER DEFAULT 0,
     buying_price REAL,
@@ -28,6 +28,49 @@ db.exec(`
     arrival_date TEXT,
     image_url TEXT,
     low_stock_threshold INTEGER DEFAULT 5
+  );
+`);
+
+// Migration: Remove brand constraint if it exists
+const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'").get();
+if (tableInfo && tableInfo.sql.includes("CHECK(brand IN")) {
+  console.log("Migrating products table to remove brand constraint...");
+  db.transaction(() => {
+    db.exec(`
+      PRAGMA foreign_keys=OFF;
+      ALTER TABLE products RENAME TO products_old;
+      CREATE TABLE products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        brand TEXT,
+        category TEXT,
+        quantity INTEGER DEFAULT 0,
+        buying_price REAL,
+        selling_price REAL,
+        supplier_name TEXT,
+        batch_number TEXT,
+        expiry_date TEXT,
+        arrival_date TEXT,
+        image_url TEXT,
+        low_stock_threshold INTEGER DEFAULT 5
+      );
+      INSERT INTO products SELECT * FROM products_old;
+      DROP TABLE products_old;
+      PRAGMA foreign_keys=ON;
+    `);
+  })();
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER,
+    platform TEXT,
+    caption TEXT,
+    scheduled_at DATETIME,
+    status TEXT DEFAULT 'posted',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(product_id) REFERENCES products(id)
   );
 
   CREATE TABLE IF NOT EXISTS customers (
@@ -301,6 +344,38 @@ async function startServer() {
     // I'll just leave this as a placeholder or remove it.
     res.status(501).json({ error: "Use frontend Gemini SDK" });
   });
+
+  app.get("/api/social-posts", (req, res) => {
+    const posts = db.prepare(`
+      SELECT sp.*, p.name as product_name, p.brand as product_brand
+      FROM social_posts sp
+      JOIN products p ON sp.product_id = p.id
+      ORDER BY sp.created_at DESC
+    `).all();
+    res.json(posts);
+  });
+
+  app.post("/api/social-posts", (req, res) => {
+    const { product_id, platform, caption, scheduled_at, status } = req.body;
+    const info = db.prepare(`
+      INSERT INTO social_posts (product_id, platform, caption, scheduled_at, status)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(product_id, platform, caption, scheduled_at, status || 'posted');
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  // Background task for scheduled posts
+  setInterval(() => {
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      UPDATE social_posts 
+      SET status = 'posted' 
+      WHERE status = 'scheduled' AND scheduled_at <= ?
+    `).run(now);
+    if (result.changes > 0) {
+      console.log(`Processed ${result.changes} scheduled posts at ${now}`);
+    }
+  }, 60000);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

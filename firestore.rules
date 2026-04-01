@@ -1,0 +1,193 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - displayName: string (optional)
+    //   - email: string (required, email format)
+    //   - role: string (required, enum: ['admin', 'assistant', 'viewer'])
+    //   - uid: string (required, matches document ID)
+    //
+    // Collection: products
+    // Document ID: {productId}
+    // Fields:
+    //   - name: string (required)
+    //   - brand: string (required, enum: ['Avon', 'Inuka', 'Avroy Shlain'])
+    //   - category: string (required)
+    //   - quantity: number (required)
+    //   - buying_price: number (required)
+    //   - selling_price: number (required)
+    //   - supplier_name: string (optional)
+    //   - batch_number: string (optional)
+    //   - expiry_date: string (optional)
+    //   - arrival_date: string (optional)
+    //   - image_url: string (optional)
+    //   - low_stock_threshold: number (optional)
+    //   - uid: string (required, matches owner ID)
+    //
+    // Collection: customers
+    // Document ID: {customerId}
+    // Fields:
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - email: string (optional)
+    //   - address: string (optional)
+    //   - category: string (required)
+    //   - uid: string (required)
+    //
+    // Collection: sales
+    // Document ID: {saleId}
+    // Fields:
+    //   - customer_id: string (required)
+    //   - total_amount: number (required)
+    //   - total_profit: number (required)
+    //   - payment_method: string (required)
+    //   - uid: string (required)
+    //
+    // Collection: notifications
+    // Document ID: {notificationId}
+    // Fields:
+    //   - type: string (required)
+    //   - message: string (required)
+    //   - is_read: number (required, 0 or 1)
+    //   - uid: string (required)
+    //
+    // Collection: social_posts
+    // Document ID: {postId}
+    // Fields:
+    //   - product_id: string (required)
+    //   - platform: string (required)
+    //   - caption: string (required)
+    //   - status: string (required, enum: ['posted', 'scheduled'])
+    //   - uid: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "motanatswa591@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'uid']) &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['admin', 'assistant', 'viewer'] &&
+             data.uid is string && data.uid.size() > 0;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'brand', 'category', 'quantity', 'buying_price', 'selling_price', 'uid']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.brand in ['Avon', 'Inuka', 'Avroy Shlain'] &&
+             data.category is string && data.category.size() > 0 &&
+             data.quantity is number && data.quantity >= 0 &&
+             data.buying_price is number && data.buying_price >= 0 &&
+             data.selling_price is number && data.selling_price >= 0 &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['name', 'phone', 'category', 'uid']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.phone is string && data.phone.size() > 0 && data.phone.size() < 20 &&
+             data.category is string && data.category.size() > 0 &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    function isValidSale(data) {
+      return data.keys().hasAll(['customer_id', 'total_amount', 'total_profit', 'payment_method', 'uid']) &&
+             data.total_amount is number && data.total_amount >= 0 &&
+             data.total_profit is number &&
+             data.payment_method is string &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['type', 'message', 'is_read', 'uid']) &&
+             data.type is string &&
+             data.message is string &&
+             data.is_read is number && (data.is_read == 0 || data.is_read == 1) &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    function isValidSocialPost(data) {
+      return data.keys().hasAll(['product_id', 'platform', 'caption', 'status', 'uid']) &&
+             data.platform is string &&
+             data.caption is string &&
+             data.status in ['posted', 'scheduled'] &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == 'viewer' || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidProduct(request.resource.data);
+      allow update: if isAuthenticated() && isValidProduct(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /customers/{customerId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow update: if isAuthenticated() && isValidCustomer(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidSale(request.resource.data);
+      allow update: if isAuthenticated() && isValidSale(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      allow update: if isAuthenticated() && isValidNotification(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /social_posts/{postId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidSocialPost(request.resource.data);
+      allow update: if isAuthenticated() && isValidSocialPost(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+  }
+}

@@ -22,7 +22,19 @@ import {
   Edit,
   History,
   Lock,
-  User as UserIcon
+  User as UserIcon,
+  Sparkles,
+  Instagram,
+  Facebook,
+  MessageCircle,
+  Clock,
+  Image as ImageIcon,
+  Camera,
+  Calendar as CalendarIcon,
+  Heart,
+  Bookmark,
+  Send,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -39,8 +51,15 @@ import {
   PieChart,
   Pie
 } from 'recharts';
+import { GoogleGenAI } from "@google/genai";
 import { api } from './services/api';
-import { Product, Customer, Sale, DashboardData, Notification, User, PerformanceReport } from './types';
+import { Product, Customer, Sale, DashboardData, Notification, User, PerformanceReport, SocialPost } from './types';
+import { useAuth } from './components/auth/FirebaseProvider';
+import { LoginForm } from './components/auth/LoginForm';
+import { auth } from './lib/firebase';
+import { fileToBase64 } from './lib/utils';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -63,121 +82,518 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode; v
     warning: 'bg-amber-100 text-amber-700',
     danger: 'bg-rose-100 text-rose-700',
   };
+  const icons = {
+    default: null,
+    success: <CheckCircle2 size={10} className="mr-1 inline" />,
+    warning: <AlertTriangle size={10} className="mr-1 inline" />,
+    danger: <X size={10} className="mr-1 inline" />,
+  };
   return (
-    <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider", variants[variant])}>
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider", variants[variant])}>
+      {icons[variant]}
       {children}
     </span>
   );
 };
 
-const LoginView = ({ onLogin }: { onLogin: (user: User) => void }) => {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
-  const [error, setError] = useState('');
+const SocialShareModal = ({ product, isOpen, onClose }: { product: Product; isOpen: boolean; onClose: () => void }) => {
+  const [vibe, setVibe] = useState<'exciting' | 'urgent' | 'professional'>('exciting');
+  const [caption, setCaption] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [platform, setPlatform] = useState<'whatsapp' | 'facebook' | 'instagram'>('whatsapp');
+  const [includeImage, setIncludeImage] = useState(true);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [showScheduler, setShowScheduler] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (isOpen) {
+      const price = `$${product.selling_price.toFixed(2)}`;
+      const brand = product.brand;
+      const name = product.name;
+
+      const templates = {
+        exciting: `✨ JUST ARRIVED! ✨\n\nElevate your beauty routine with the all-new ${brand} ${name}! 💄\n\nAvailable now for only ${price}. Don't miss out on this glow-up essential! 💖\n\nOrder yours now! 📲`,
+        urgent: `🔥 LIMITED STOCK ALERT! 🔥\n\nOur best-selling ${brand} ${name} is running low! 😱\n\nGrab yours for ${price} before it's gone. Once it's out, it's out! ⏳\n\nDM to secure yours! 🏃‍♀️💨`,
+        professional: `SmartStock Beauty Update: ${brand} ${name}\n\nWe are pleased to announce that ${name} is currently in stock and available for purchase.\n\nPrice: ${price}\nCategory: ${product.category}\n\nContact us for orders and inquiries. 📩`
+      };
+      setCaption(templates[vibe]);
+    }
+  }, [isOpen, vibe, product]);
+
+  const generateAICaption = async () => {
+    setIsGenerating(true);
     try {
-      const user = await api.login({ username, password });
-      onLogin(user);
-    } catch (err) {
-      setError('Invalid username or password');
+      const isLowStock = product.quantity <= product.low_stock_threshold;
+      const prompt = `Generate a catchy social media caption for a beauty product.
+      Product: ${product.name}
+      Brand: ${product.brand}
+      Price: $${product.selling_price}
+      Status: ${isLowStock ? 'Running low on stock' : 'New arrival'}
+      Vibe: ${vibe}
+      Keep it short, use emojis, and include a call to action.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+      
+      if (response.text) {
+        setCaption(response.text.trim());
+      }
+    } catch (error) {
+      console.error("AI Generation failed:", error);
+      alert("AI generation failed. Please try again.");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-sm space-y-8"
-      >
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-white mx-auto shadow-xl">
-            <Package size={32} />
-          </div>
-          <h1 className="text-2xl font-black tracking-tight">SmartStock</h1>
-          <p className="text-slate-500 text-sm">Sign in to manage your beauty business</p>
-        </div>
+  const handleShare = async () => {
+    if (showScheduler && (!scheduleDate || !scheduleTime)) {
+      alert("Please select date and time for scheduling.");
+      return;
+    }
 
-        <Card className="p-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Username</label>
-              <div className="relative">
-                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="text" 
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-black/5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                  placeholder="Enter username"
-                />
+    if (showScheduler) {
+      const scheduledAt = `${scheduleDate}T${scheduleTime}`;
+      await api.createSocialPost({
+        product_id: product.id,
+        platform,
+        caption,
+        scheduled_at: scheduledAt,
+        status: 'scheduled'
+      });
+      alert(`Post scheduled for ${scheduledAt} on ${platform}`);
+      onClose();
+      return;
+    }
+
+    // Immediate share logic
+    await api.createSocialPost({
+      product_id: product.id,
+      platform,
+      caption,
+      status: 'posted'
+    });
+
+    if (platform === 'whatsapp') {
+      window.open(`https://wa.me/?text=${encodeURIComponent(caption)}`, '_blank');
+    } else {
+      navigator.clipboard.writeText(caption);
+      alert(`Caption copied! Opening ${platform}...`);
+      const urls = {
+        facebook: 'https://www.facebook.com',
+        instagram: 'https://www.instagram.com'
+      };
+      window.open(urls[platform], '_blank');
+    }
+    onClose();
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[80] p-4 flex items-end sm:items-center justify-center overflow-y-auto"
+        >
+          <motion.div 
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            className="bg-white w-full max-w-2xl rounded-3xl p-6 space-y-6 my-8"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-black flex items-center gap-2">
+                <Share2 size={24} className="text-indigo-600" /> ✨ Promote Product
+              </h2>
+              <button onClick={onClose} className="p-2 bg-slate-100 rounded-full"><X size={20} /></button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Controls */}
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Platform</label>
+                  <div className="flex gap-2">
+                    {[
+                      { id: 'whatsapp', icon: MessageCircle, color: 'bg-emerald-500' },
+                      { id: 'facebook', icon: Facebook, color: 'bg-blue-600' },
+                      { id: 'instagram', icon: Instagram, color: 'bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600' }
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setPlatform(p.id as any)}
+                        className={cn(
+                          "flex-1 py-3 rounded-xl flex flex-col items-center gap-1 transition-all border-2",
+                          platform === p.id ? "border-slate-900 bg-slate-50" : "border-transparent bg-slate-100"
+                        )}
+                      >
+                        <p.icon size={20} className={platform === p.id ? "text-slate-900" : "text-slate-400"} />
+                        <span className="text-[10px] font-bold capitalize">{p.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-end">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Caption</label>
+                    <button 
+                      onClick={generateAICaption}
+                      disabled={isGenerating}
+                      className="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:underline disabled:opacity-50"
+                    >
+                      <Sparkles size={12} /> {isGenerating ? 'Generating...' : 'AI Magic'}
+                    </button>
+                  </div>
+                  <textarea
+                    value={caption}
+                    onChange={(e) => setCaption(e.target.value)}
+                    className="w-full h-32 p-4 bg-slate-50 rounded-2xl border border-black/5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                  <div className="flex items-center gap-2">
+                    <ImageIcon size={18} className="text-slate-400" />
+                    <span className="text-xs font-bold">Include Product Image</span>
+                  </div>
+                  <button 
+                    onClick={() => setIncludeImage(!includeImage)}
+                    className={cn(
+                      "w-10 h-6 rounded-full transition-all relative",
+                      includeImage ? "bg-indigo-600" : "bg-slate-300"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                      includeImage ? "right-1" : "left-1"
+                    )} />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <button 
+                    onClick={() => setShowScheduler(!showScheduler)}
+                    className="text-xs font-bold text-slate-500 flex items-center gap-2"
+                  >
+                    <Clock size={14} /> {showScheduler ? 'Cancel Scheduling' : 'Schedule for later'}
+                  </button>
+                  {showScheduler && (
+                    <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2">
+                      <input 
+                        type="date" 
+                        value={scheduleDate}
+                        onChange={(e) => setScheduleDate(e.target.value)}
+                        className="p-3 bg-slate-50 rounded-xl border border-black/5 text-xs"
+                      />
+                      <input 
+                        type="time" 
+                        value={scheduleTime}
+                        onChange={(e) => setScheduleTime(e.target.value)}
+                        className="p-3 bg-slate-50 rounded-xl border border-black/5 text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Preview */}
+              <div className="space-y-4">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Preview</label>
+                <div className={cn(
+                  "border border-black/5 rounded-3xl overflow-hidden shadow-sm bg-white transition-all duration-500",
+                  platform === 'instagram' ? "max-w-[300px] mx-auto" : ""
+                )}>
+                  {/* Platform Header */}
+                  <div className="p-3 border-b border-black/5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-8 h-8 rounded-full flex items-center justify-center text-white",
+                        platform === 'whatsapp' ? "bg-emerald-500" : 
+                        platform === 'facebook' ? "bg-blue-600" : 
+                        "bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600"
+                      )}>
+                        {platform === 'whatsapp' ? <MessageCircle size={16} /> : 
+                         platform === 'facebook' ? <Facebook size={16} /> : 
+                         <Instagram size={16} />}
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold">SmartStock Beauty</p>
+                        <p className="text-[8px] text-slate-400">{platform === 'whatsapp' ? 'Online' : 'Sponsored'}</p>
+                      </div>
+                    </div>
+                    {platform === 'instagram' && <div className="flex gap-0.5"><div className="w-1 h-1 bg-slate-300 rounded-full"/><div className="w-1 h-1 bg-slate-300 rounded-full"/><div className="w-1 h-1 bg-slate-300 rounded-full"/></div>}
+                  </div>
+                  {/* Image */}
+                  {includeImage && (
+                    <div className="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+                      {product.image_url ? (
+                        <img src={product.image_url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <ImageIcon size={48} className="text-slate-200" />
+                      )}
+                    </div>
+                  )}
+                  {/* Actions */}
+                  {platform !== 'whatsapp' && (
+                    <div className="p-3 flex justify-between">
+                      <div className="flex gap-3">
+                        <Heart size={18} className="text-slate-400" />
+                        <MessageCircle size={18} className="text-slate-400" />
+                        <Send size={18} className="text-slate-400" />
+                      </div>
+                      <Bookmark size={18} className="text-slate-400" />
+                    </div>
+                  )}
+                  {/* Caption */}
+                  <div className={cn(
+                    "px-3 pb-4 space-y-1",
+                    platform === 'whatsapp' ? "bg-[#e5ddd5] pt-3" : ""
+                  )}>
+                    {platform === 'whatsapp' ? (
+                      <div className="bg-white p-2 rounded-lg rounded-tl-none shadow-sm relative">
+                        <div className="absolute -left-2 top-0 w-0 h-0 border-t-[8px] border-t-white border-l-[8px] border-l-transparent" />
+                        <p className="text-[10px] text-slate-800 whitespace-pre-wrap">{caption}</p>
+                        <p className="text-[8px] text-slate-400 text-right mt-1">12:00 PM</p>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-[10px] font-bold">SmartStock Beauty</p>
+                        <p className="text-[10px] text-slate-600 line-clamp-3 whitespace-pre-wrap">{caption}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="password" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-black/5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                  placeholder="Enter password"
-                />
-              </div>
-            </div>
-            {error && <p className="text-rose-500 text-xs font-medium text-center">{error}</p>}
+
             <button 
-              type="submit"
-              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold shadow-xl shadow-slate-200 active:scale-[0.98] transition-all"
+              onClick={handleShare}
+              className={cn(
+                "w-full py-4 rounded-2xl font-black text-white shadow-lg transition-all active:scale-95",
+                platform === 'whatsapp' ? "bg-emerald-500" : 
+                platform === 'facebook' ? "bg-blue-600" : 
+                "bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600"
+              )}
             >
-              Sign In
+              {showScheduler ? 'Schedule Post' : `Post to ${platform.charAt(0).toUpperCase() + platform.slice(1)}`}
             </button>
-          </form>
-        </Card>
-      </motion.div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const SocialPostsView = () => {
+  const [posts, setPosts] = useState<SocialPost[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    api.getSocialPosts().then(data => {
+      setPosts(data);
+      setIsLoading(false);
+    });
+  }, []);
+
+  if (isLoading) return <div className="p-8 text-center text-slate-400">Loading history...</div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-2xl font-black">✨ Social History</h2>
+        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+          <Share2 size={20} />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {posts.length === 0 ? (
+          <Card className="p-12 text-center space-y-4">
+            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300">
+              <Share2 size={32} />
+            </div>
+            <p className="text-slate-500 font-medium">No posts shared yet.</p>
+          </Card>
+        ) : (
+          posts.map((post) => (
+            <Card key={post.id} className="p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "p-2 rounded-xl text-white",
+                    post.platform === 'whatsapp' ? "bg-emerald-500" : 
+                    post.platform === 'facebook' ? "bg-blue-600" : 
+                    "bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600"
+                  )}>
+                    {post.platform === 'whatsapp' ? <MessageCircle size={16} /> : 
+                     post.platform === 'facebook' ? <Facebook size={16} /> : 
+                     <Instagram size={16} />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-black">{post.product_name}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{post.product_brand}</p>
+                  </div>
+                </div>
+                <Badge variant={post.status === 'scheduled' ? 'warning' : 'success'}>
+                  {post.status}
+                </Badge>
+              </div>
+              
+              <p className="text-xs text-slate-600 line-clamp-2 italic bg-slate-50 p-2 rounded-lg border border-black/5">
+                "{post.caption}"
+              </p>
+
+              <div className="flex justify-between items-center pt-2 border-t border-black/5">
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold">
+                  <CalendarIcon size={12} />
+                  {new Date(post.created_at).toLocaleDateString()}
+                </div>
+                {post.scheduled_at && (
+                  <div className="flex items-center gap-1 text-[10px] text-indigo-500 font-bold">
+                    <Clock size={12} />
+                    Scheduled: {new Date(post.scheduled_at).toLocaleString()}
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 };
 
-const SocialShareModal = ({ product, isOpen, onClose }: { product: Product; isOpen: boolean; onClose: () => void }) => {
-  const [vibe, setVibe] = useState<'exciting' | 'urgent' | 'professional'>('exciting');
+const ReceiptModal = ({ sale, customer, items, products, onClose }: { 
+  sale: any; 
+  customer: Customer | undefined; 
+  items: { product_id: number; quantity: number }[]; 
+  products: Product[];
+  onClose: () => void;
+}) => {
+  const total = items.reduce((sum, item) => {
+    const p = products.find(p => p.id === item.product_id);
+    return sum + (p ? p.selling_price * item.quantity : 0);
+  }, 0);
 
-  const getCaption = () => {
-    const price = `$${product.selling_price.toFixed(2)}`;
-    const brand = product.brand;
-    const name = product.name;
+  return (
+    <AnimatePresence>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] p-4 flex items-center justify-center"
+      >
+        <motion.div 
+          initial={{ scale: 0.9, y: 20 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.9, y: 20 }}
+          className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+        >
+          <div className="bg-slate-900 p-6 text-center text-white space-y-2">
+            <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 size={24} className="text-emerald-400" />
+            </div>
+            <h2 className="text-xl font-black tracking-tight">🎉 Sale Complete!</h2>
+            <p className="text-slate-400 text-xs">Transaction ID: #{sale.id || 'N/A'}</p>
+          </div>
 
-    const templates = {
-      exciting: `✨ JUST ARRIVED! ✨\n\nElevate your beauty routine with the all-new ${brand} ${name}! 💄\n\nAvailable now for only ${price}. Don't miss out on this glow-up essential! 💖\n\nOrder yours now! 📲`,
-      urgent: `🔥 LIMITED STOCK ALERT! 🔥\n\nOur best-selling ${brand} ${name} is running low! 😱\n\nGrab yours for ${price} before it's gone. Once it's out, it's out! ⏳\n\nDM to secure yours! 🏃‍♀️💨`,
-      professional: `SmartStock Beauty Update: ${brand} ${name}\n\nWe are pleased to announce that ${name} is currently in stock and available for purchase.\n\nPrice: ${price}\nCategory: ${product.category}\n\nContact us for orders and inquiries. 📩`
-    };
-    return templates[vibe];
+          <div className="p-6 space-y-6 flex-1 overflow-y-auto max-h-[60vh]">
+            <div className="space-y-4">
+              <div className="flex justify-between items-end border-b border-dashed border-slate-200 pb-4">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Customer</p>
+                  <p className="text-sm font-bold">{customer?.name || 'Walk-in Customer'}</p>
+                </div>
+                <div className="text-right space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Date</p>
+                  <p className="text-sm font-bold">{new Date().toLocaleDateString()}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Items</p>
+                {items.map((item, i) => {
+                  const p = products.find(prod => prod.id === item.product_id);
+                  return (
+                    <div key={i} className="flex justify-between text-sm">
+                      <span className="text-slate-600 font-medium">
+                        {p?.name} <span className="text-slate-400 text-xs">x{item.quantity}</span>
+                      </span>
+                      <span className="font-bold">${((p?.selling_price || 0) * item.quantity).toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-4 border-t border-slate-200 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Payment Method</span>
+                  <span className="font-bold">{sale.payment_method || 'Cash'}</span>
+                </div>
+                <div className="flex justify-between text-lg font-black pt-2">
+                  <span>Total Paid</span>
+                  <span className="text-emerald-600">${total.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl text-center space-y-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase">✨ Thank you for shopping!</p>
+              <p className="text-[10px] text-slate-500">SmartStock Beauty Tracker</p>
+            </div>
+          </div>
+
+          <div className="p-6 pt-0">
+            <button 
+              onClick={onClose}
+              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold shadow-xl active:scale-95 transition-all"
+            >
+              Done
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Product; isOpen: boolean; onClose: () => void; onUpdate: () => void }) => {
+  const [formData, setFormData] = useState(product);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const base64 = await fileToBase64(file);
+      setFormData({ ...formData, image_url: base64 });
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Failed to process image');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const handleShare = (platform: 'whatsapp' | 'facebook' | 'instagram' | 'system') => {
-    const text = getCaption();
-    
-    if (platform === 'whatsapp') {
-      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-    } else if (platform === 'facebook') {
-      // Facebook doesn't allow pre-filling text via URL anymore, but we can copy it
-      navigator.clipboard.writeText(text);
-      alert('Caption copied! Opening Facebook...');
-      window.open('https://www.facebook.com', '_blank');
-    } else if (platform === 'instagram') {
-      navigator.clipboard.writeText(text);
-      alert('Caption copied! Opening Instagram...');
-      window.open('https://www.instagram.com', '_blank');
-    } else if (platform === 'system' && navigator.share) {
-      navigator.share({
-        title: `New Arrival: ${product.name}`,
-        text: text,
-      }).catch(console.error);
-    }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await api.updateProduct(product.id, {
+      ...formData,
+      quantity: Number(formData.quantity),
+      buying_price: Number(formData.buying_price),
+      selling_price: Number(formData.selling_price),
+      low_stock_threshold: Number(formData.low_stock_threshold),
+    } as any);
+    onUpdate();
+    onClose();
   };
 
   return (
@@ -193,63 +609,127 @@ const SocialShareModal = ({ product, isOpen, onClose }: { product: Product; isOp
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
-            className="bg-white w-full max-w-md rounded-3xl p-6 space-y-6"
+            className="bg-white w-full max-w-md rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-black">Promote Product</h2>
+              <h2 className="text-xl font-black">✏️ Edit Product</h2>
               <button onClick={onClose} className="p-2 bg-slate-100 rounded-full"><X size={20} /></button>
             </div>
-
-            <div className="space-y-3">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Choose Vibe</label>
-              <div className="flex gap-2">
-                {(['exciting', 'urgent', 'professional'] as const).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setVibe(v)}
-                    className={cn(
-                      "flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all",
-                      vibe === v ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
-                    )}
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Product Image</label>
+                <div className="flex gap-2">
+                  <input 
+                    value={formData.image_url || ''} 
+                    onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                    placeholder="Image URL or upload from gallery" 
+                    className="flex-1 p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                  <label className="p-3 bg-slate-100 rounded-xl text-slate-600 cursor-pointer hover:bg-slate-200 transition-colors">
+                    <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+                    {isUploading ? <div className="w-5 h-5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> : <Upload size={20} />}
+                  </label>
+                  <button 
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_url: `https://picsum.photos/seed/${Math.random()}/400/400` })}
+                    className="p-3 bg-slate-100 rounded-xl text-slate-600"
                   >
-                    {v}
+                    <Camera size={20} />
                   </button>
-                ))}
+                </div>
+                {formData.image_url && (
+                  <div className="mt-2 w-20 h-20 rounded-xl overflow-hidden border border-black/5">
+                    <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                )}
               </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-black/5">
-              <p className="text-xs text-slate-600 whitespace-pre-wrap italic leading-relaxed">
-                "{getCaption()}"
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <button 
-                onClick={() => handleShare('whatsapp')}
-                className="py-3 bg-emerald-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-sm"
-              >
-                WhatsApp
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Brand</label>
+                  <select 
+                    value={formData.brand} 
+                    onChange={(e) => setFormData({ ...formData, brand: e.target.value as any })}
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm"
+                  >
+                    <option>Avon</option>
+                    <option>Inuka</option>
+                    <option>Avroy Shlain</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Category</label>
+                  <input 
+                    value={formData.category} 
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    placeholder="e.g. Perfume" 
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Product Name</label>
+                <input 
+                  value={formData.name} 
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required 
+                  placeholder="Enter name" 
+                  className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Qty</label>
+                  <input 
+                    value={formData.quantity} 
+                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
+                    type="number" 
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Buy $</label>
+                  <input 
+                    value={formData.buying_price} 
+                    onChange={(e) => setFormData({ ...formData, buying_price: Number(e.target.value) })}
+                    type="number" 
+                    step="0.01" 
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sell $</label>
+                  <input 
+                    value={formData.selling_price} 
+                    onChange={(e) => setFormData({ ...formData, selling_price: Number(e.target.value) })}
+                    type="number" 
+                    step="0.01" 
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Batch #</label>
+                  <input 
+                    value={formData.batch_number} 
+                    onChange={(e) => setFormData({ ...formData, batch_number: e.target.value })}
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Threshold</label>
+                  <input 
+                    value={formData.low_stock_threshold} 
+                    onChange={(e) => setFormData({ ...formData, low_stock_threshold: Number(e.target.value) })}
+                    type="number" 
+                    className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                  />
+                </div>
+              </div>
+              <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold shadow-xl shadow-slate-200">
+                Update Product
               </button>
-              <button 
-                onClick={() => handleShare('facebook')}
-                className="py-3 bg-blue-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-sm"
-              >
-                Facebook
-              </button>
-              <button 
-                onClick={() => handleShare('instagram')}
-                className="py-3 bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-sm"
-              >
-                Instagram
-              </button>
-              <button 
-                onClick={() => handleShare('system')}
-                className="py-3 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-sm"
-              >
-                More Options
-              </button>
-            </div>
+            </form>
           </motion.div>
         </motion.div>
       )}
@@ -259,14 +739,24 @@ const SocialShareModal = ({ product, isOpen, onClose }: { product: Product; isOp
 
 // --- Views ---
 
-const DashboardView = ({ data }: { data: DashboardData | null }) => {
+const DashboardView = ({ 
+  data, 
+  onAction, 
+  onAddProduct, 
+  onAddCustomer 
+}: { 
+  data: DashboardData | null; 
+  onAction: (tab: string) => void;
+  onAddProduct: () => void;
+  onAddCustomer: () => void;
+}) => {
   if (!data) return <div className="p-8 text-center text-slate-400">Loading dashboard...</div>;
 
   const stats = [
-    { label: 'Total Sales', value: `$${data.stats.totalSales.toFixed(2)}`, icon: TrendingUp, color: 'text-emerald-600' },
-    { label: 'Total Profit', value: `$${data.stats.totalProfit.toFixed(2)}`, icon: BarChart3, color: 'text-indigo-600' },
-    { label: 'Low Stock', value: data.stats.lowStock, icon: AlertTriangle, color: 'text-amber-600' },
-    { label: 'Out of Stock', value: data.stats.outOfStock, icon: X, color: 'text-rose-600' },
+    { label: '💰 Total Sales', value: `$${data.stats.totalSales.toFixed(2)}`, icon: TrendingUp, color: 'text-emerald-600' },
+    { label: '📈 Total Profit', value: `$${data.stats.totalProfit.toFixed(2)}`, icon: BarChart3, color: 'text-indigo-600' },
+    { label: '⚠️ Low Stock', value: data.stats.lowStock, icon: AlertTriangle, color: 'text-amber-600' },
+    { label: '🚫 Out of Stock', value: data.stats.outOfStock, icon: X, color: 'text-rose-600' },
   ];
 
   return (
@@ -317,14 +807,19 @@ const DashboardView = ({ data }: { data: DashboardData | null }) => {
       </Card>
 
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold px-1">Quick Actions</h3>
+        <h3 className="text-sm font-semibold px-1">⚡ Quick Actions</h3>
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'New Sale', icon: ShoppingCart, color: 'bg-emerald-500' },
-            { label: 'Add Stock', icon: Plus, color: 'bg-indigo-500' },
-            { label: 'Reports', icon: BarChart3, color: 'bg-slate-800' },
+            { label: '🛍️ New Sale', icon: ShoppingCart, color: 'bg-emerald-500', onClick: () => onAction('sales') },
+            { label: '📦 Add Stock', icon: Plus, color: 'bg-indigo-500', onClick: onAddProduct },
+            { label: '👥 New User', icon: Users, color: 'bg-amber-500', onClick: onAddCustomer },
+            { label: '📊 Reports', icon: BarChart3, color: 'bg-slate-800', onClick: () => onAction('reports') },
           ].map((action, i) => (
-            <button key={i} className="flex flex-col items-center gap-2 p-3 bg-white rounded-2xl border border-black/5 shadow-sm active:scale-95 transition-transform">
+            <button 
+              key={i} 
+              onClick={action.onClick}
+              className="flex flex-col items-center gap-2 p-3 bg-white rounded-2xl border border-black/5 shadow-sm active:scale-95 transition-transform"
+            >
               <div className={cn("p-2 rounded-xl text-white", action.color)}>
                 <action.icon size={20} />
               </div>
@@ -339,9 +834,10 @@ const DashboardView = ({ data }: { data: DashboardData | null }) => {
 
 const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product[]; onAddProduct: () => void; onUpdate: () => void }) => {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'All' | 'Avon' | 'Inuka'>('All');
+  const [filter, setFilter] = useState<'All' | 'Avon' | 'Inuka' | 'Avroy Shlain'>('All');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [sharingProduct, setSharingProduct] = useState<Product | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const filtered = products.filter(p => 
     (filter === 'All' || p.brand === filter) &&
@@ -361,6 +857,16 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xl font-black tracking-tight">📦 Inventory</h2>
+        <button 
+          onClick={onAddProduct}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 active:scale-95 transition-transform"
+        >
+          <Plus size={18} /> Add New
+        </button>
+      </div>
+
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -372,16 +878,10 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <button 
-          onClick={onAddProduct}
-          className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-200 active:scale-95 transition-transform"
-        >
-          <Plus size={24} />
-        </button>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-        {['All', 'Avon', 'Inuka'].map((f) => (
+        {['All', 'Avon', 'Inuka', 'Avroy Shlain'].map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f as any)}
@@ -427,6 +927,14 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
             </div>
             <div className="flex flex-col gap-2">
               <button onClick={() => handleShare(product)} className="p-1.5 text-slate-400 hover:text-indigo-600"><Share2 size={16} /></button>
+              <button 
+                onClick={() => {
+                  setEditingProduct(product);
+                }} 
+                className="p-1.5 text-slate-400 hover:text-amber-600"
+              >
+                <Edit size={16} />
+              </button>
               <button onClick={() => handleDelete(product.id)} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={16} /></button>
             </div>
           </Card>
@@ -468,20 +976,20 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-3 bg-slate-50 rounded-2xl">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">Selling Price</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">💰 Selling Price</p>
                     <p className="text-lg font-black text-indigo-600">${selectedProduct.selling_price.toFixed(2)}</p>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-2xl">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">Current Stock</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">📦 Current Stock</p>
                     <p className="text-lg font-black text-slate-900">{selectedProduct.quantity}</p>
                   </div>
                 </div>
                 <div className="space-y-2 text-xs text-slate-600">
-                  <div className="flex justify-between"><span>Buying Price</span><span className="font-bold">${selectedProduct.buying_price.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>Supplier</span><span className="font-bold">{selectedProduct.supplier_name || 'N/A'}</span></div>
-                  <div className="flex justify-between"><span>Batch Number</span><span className="font-bold">{selectedProduct.batch_number}</span></div>
-                  <div className="flex justify-between"><span>Arrival Date</span><span className="font-bold">{selectedProduct.arrival_date}</span></div>
-                  <div className="flex justify-between"><span>Expiry Date</span><span className="font-bold text-rose-500">{selectedProduct.expiry_date}</span></div>
+                  <div className="flex justify-between"><span>💵 Buying Price</span><span className="font-bold">${selectedProduct.buying_price.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>🏢 Supplier</span><span className="font-bold">{selectedProduct.supplier_name || 'N/A'}</span></div>
+                  <div className="flex justify-between"><span>🔢 Batch Number</span><span className="font-bold">{selectedProduct.batch_number}</span></div>
+                  <div className="flex justify-between"><span>📅 Arrival Date</span><span className="font-bold">{selectedProduct.arrival_date}</span></div>
+                  <div className="flex justify-between"><span>⌛ Expiry Date</span><span className="font-bold text-rose-500">{selectedProduct.expiry_date}</span></div>
                 </div>
                 <div className="flex gap-3">
                   <button 
@@ -492,8 +1000,8 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
                   </button>
                   <button 
                     onClick={() => {
-                      // Logic for edit could go here
-                      alert('Edit feature coming soon!');
+                      setEditingProduct(selectedProduct);
+                      setSelectedProduct(null);
                     }}
                     className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2"
                   >
@@ -505,6 +1013,15 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
           </motion.div>
         )}
       </AnimatePresence>
+
+      {editingProduct && (
+        <EditProductModal 
+          product={editingProduct}
+          isOpen={!!editingProduct}
+          onClose={() => setEditingProduct(null)}
+          onUpdate={onUpdate}
+        />
+      )}
 
       {sharingProduct && (
         <SocialShareModal 
@@ -522,6 +1039,7 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [search, setSearch] = useState('');
+  const [completedSale, setCompletedSale] = useState<any | null>(null);
 
   const addToCart = (productId: number) => {
     setCart(prev => {
@@ -555,16 +1073,25 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
   const handleCheckout = async () => {
     if (!selectedCustomerId || cart.length === 0) return;
     try {
-      await api.createSale({
+      const result = await api.createSale({
         customer_id: Number(selectedCustomerId),
         items: cart,
         payment_method: paymentMethod,
         assistant_id: 1 // Mocked for now
       });
+      
+      // Store current cart and customer for receipt before clearing
+      const saleData = {
+        id: result.id,
+        payment_method: paymentMethod,
+        items: [...cart],
+        customer_id: selectedCustomerId
+      };
+      
+      setCompletedSale(saleData);
       setCart([]);
       setSelectedCustomerId('');
       onSaleComplete();
-      alert('Sale completed successfully!');
     } catch (err: any) {
       alert(err.message);
     }
@@ -652,6 +1179,16 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
           </button>
         </div>
       </div>
+
+      {completedSale && (
+        <ReceiptModal 
+          sale={completedSale}
+          customer={customers.find(c => c.id === completedSale.customer_id)}
+          items={completedSale.items}
+          products={products}
+          onClose={() => setCompletedSale(null)}
+        />
+      )}
     </div>
   );
 };
@@ -675,6 +1212,7 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
 
   return (
     <div className="space-y-6">
+      <h2 className="text-2xl font-black px-1">📊 Performance Report</h2>
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4 bg-indigo-600 text-white">
           <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Revenue</p>
@@ -690,7 +1228,7 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
         <div className="space-y-6">
           <Card className="p-4">
             <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-              <BarChart3 size={16} /> Brand Performance
+              <BarChart3 size={16} /> 📈 Brand Performance
             </h3>
             <div className="h-48">
               <ResponsiveContainer width="100%" height="100%">
@@ -709,7 +1247,7 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
 
           <div className="grid grid-cols-2 gap-4">
             <Card className="p-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">Top Categories</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">🏆 Top Categories</h3>
               <div className="space-y-2">
                 {performance.categoryPerformance.map((cat, i) => (
                   <div key={i} className="flex justify-between items-center">
@@ -720,7 +1258,7 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
               </div>
             </Card>
             <Card className="p-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">Best Sellers</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">🔥 Best Sellers</h3>
               <div className="space-y-2">
                 {performance.topProducts.map((prod, i) => (
                   <div key={i} className="flex justify-between items-center">
@@ -735,7 +1273,7 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
       )}
 
       <div className="space-y-3">
-        <h3 className="text-sm font-bold px-1">Recent Transactions</h3>
+        <h3 className="text-sm font-bold px-1">📜 Recent Transactions</h3>
         <div className="space-y-2">
           {sales.map(sale => (
             <Card key={sale.id} className="p-3 flex items-center justify-between">
@@ -787,6 +1325,16 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xl font-black tracking-tight">👥 Customers</h2>
+        <button 
+          onClick={onAddCustomer}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 active:scale-95 transition-transform"
+        >
+          <Plus size={18} /> Add New
+        </button>
+      </div>
+
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -798,12 +1346,6 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <button 
-          onClick={onAddCustomer}
-          className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg active:scale-95 transition-transform"
-        >
-          <Plus size={24} />
-        </button>
       </div>
 
       <div className="grid gap-3">
@@ -933,8 +1475,8 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'sales' | 'customers' | 'reports'>('dashboard');
+  const { user, loading: authLoading } = useAuth();
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'sales' | 'customers' | 'reports' | 'social'>('dashboard');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -943,17 +1485,20 @@ export default function App() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [newProductImageUrl, setNewProductImageUrl] = useState('');
 
   const fetchData = async () => {
+    if (!user) return;
     try {
-      const [db, prod, cust, sls, notifs] = await Promise.all([
+      const [dbData, prod, cust, sls, notifs] = await Promise.all([
         api.getDashboardData(),
         api.getProducts(),
         api.getCustomers(),
         api.getSalesReport(),
         api.getNotifications()
       ]);
-      setDashboardData(db);
+      setDashboardData(dbData);
       setProducts(prod);
       setCustomers(cust);
       setSales(sls);
@@ -964,22 +1509,56 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const base64 = await fileToBase64(file);
+      setNewProductImageUrl(base64);
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Failed to process image');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <DashboardView data={dashboardData} />;
+      case 'dashboard': return (
+        <DashboardView 
+          data={dashboardData} 
+          onAction={setActiveTab} 
+          onAddProduct={() => { setActiveTab('inventory'); setShowAddProduct(true); }}
+          onAddCustomer={() => { setActiveTab('customers'); setShowAddCustomer(true); }}
+        />
+      );
       case 'inventory': return <InventoryView products={products} onAddProduct={() => setShowAddProduct(true)} onUpdate={fetchData} />;
       case 'sales': return <SalesView products={products} customers={customers} onSaleComplete={fetchData} />;
       case 'customers': return <CustomersView customers={customers} onAddCustomer={() => setShowAddCustomer(true)} onUpdate={fetchData} />;
       case 'reports': return <ReportsView sales={sales} />;
+      case 'social': return <SocialPostsView />;
       default: return <div className="p-8 text-center text-slate-400">Coming Soon</div>;
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f5f5f5]">
+        <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   if (!user) {
-    return <LoginView onLogin={setUser} />;
+    return <LoginForm />;
   }
 
   return (
@@ -995,7 +1574,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => setUser(null)}
+              onClick={() => auth.signOut()}
               className="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
             >
               <LogOut size={20} />
@@ -1009,8 +1588,8 @@ export default function App() {
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white" />
               )}
             </button>
-            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
-              AD
+            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs uppercase">
+              {user.email?.charAt(0)}
             </div>
           </div>
         </div>
@@ -1035,11 +1614,12 @@ export default function App() {
       <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-black/5 px-4 py-2 z-50">
         <div className="max-w-md mx-auto flex items-center justify-between">
           {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
-            { id: 'inventory', icon: Package, label: 'Stock' },
-            { id: 'sales', icon: ShoppingCart, label: 'Sell' },
-            { id: 'customers', icon: Users, label: 'Users' },
-            { id: 'reports', icon: BarChart3, label: 'Stats' },
+            { id: 'dashboard', icon: LayoutDashboard, label: '🏠 Home' },
+            { id: 'inventory', icon: Package, label: '📦 Stock' },
+            { id: 'sales', icon: ShoppingCart, label: '🛍️ Sell' },
+            { id: 'customers', icon: Users, label: '👥 Users' },
+            { id: 'social', icon: Share2, label: '✨ Social' },
+            { id: 'reports', icon: BarChart3, label: '📊 Stats' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1069,10 +1649,10 @@ export default function App() {
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="bg-white w-full max-w-md rounded-3xl p-6 space-y-6"
+              className="bg-white w-full max-w-md rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-black">Add New Product</h2>
+                <h2 className="text-xl font-black">📦 Add New Product</h2>
                 <button onClick={() => setShowAddProduct(false)} className="p-2 bg-slate-100 rounded-full"><X size={20} /></button>
               </div>
               <form className="space-y-4" onSubmit={async (e) => {
@@ -1081,20 +1661,51 @@ export default function App() {
                 const data = Object.fromEntries(formData.entries());
                 await api.createProduct({
                   ...data,
+                  image_url: newProductImageUrl || (data.image_url as string),
                   quantity: Number(data.quantity),
                   buying_price: Number(data.buying_price),
                   selling_price: Number(data.selling_price),
                   low_stock_threshold: Number(data.low_stock_threshold),
                 } as any);
                 setShowAddProduct(false);
+                setNewProductImageUrl('');
                 fetchData();
               }}>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Product Image</label>
+                  <div className="flex gap-2">
+                    <input 
+                      name="image_url" 
+                      value={newProductImageUrl}
+                      onChange={(e) => setNewProductImageUrl(e.target.value)}
+                      placeholder="Image URL or upload from gallery" 
+                      className="flex-1 p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
+                    />
+                    <label className="p-3 bg-slate-100 rounded-xl text-slate-600 cursor-pointer hover:bg-slate-200 transition-colors">
+                      <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+                      {isUploading ? <div className="w-5 h-5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> : <Upload size={20} />}
+                    </label>
+                    <button 
+                      type="button"
+                      onClick={() => setNewProductImageUrl(`https://picsum.photos/seed/${Math.random()}/400/400`)}
+                      className="p-3 bg-slate-100 rounded-xl text-slate-600"
+                    >
+                      <Camera size={20} />
+                    </button>
+                  </div>
+                  {newProductImageUrl && (
+                    <div className="mt-2 w-20 h-20 rounded-xl overflow-hidden border border-black/5">
+                      <img src={newProductImageUrl} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Brand</label>
                     <select name="brand" className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm">
                       <option>Avon</option>
                       <option>Inuka</option>
+                      <option>Avroy Shlain</option>
                     </select>
                   </div>
                   <div className="space-y-1.5">
@@ -1152,10 +1763,10 @@ export default function App() {
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="bg-white w-full max-w-md rounded-3xl p-6 space-y-6"
+              className="bg-white w-full max-w-md rounded-3xl p-6 space-y-6 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-black">Add New Customer</h2>
+                <h2 className="text-xl font-black">👥 Add New Customer</h2>
                 <button onClick={() => setShowAddCustomer(false)} className="p-2 bg-slate-100 rounded-full"><X size={20} /></button>
               </div>
               <form className="space-y-4" onSubmit={async (e) => {
