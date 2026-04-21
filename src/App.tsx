@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, 
   Package, 
@@ -34,9 +34,16 @@ import {
   Heart,
   Bookmark,
   Send,
-  Upload
+  Upload,
+  Filter,
+  FileUp,
+  FileDown,
+  Zap,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Papa from 'papaparse';
+import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns';
 import { 
   LineChart, 
   Line, 
@@ -474,13 +481,13 @@ const SocialPostsView = () => {
 const ReceiptModal = ({ sale, customer, items, products, onClose }: { 
   sale: any; 
   customer: Customer | undefined; 
-  items: { product_id: number; quantity: number }[]; 
+  items: { product_id: string; quantity: number }[]; 
   products: Product[];
   onClose: () => void;
 }) => {
   const total = items.reduce((sum, item) => {
     const p = products.find(p => p.id === item.product_id);
-    return sum + (p ? p.selling_price * item.quantity : 0);
+    return sum + (p ? (Number(p.selling_price) || 0) * item.quantity : 0);
   }, 0);
 
   return (
@@ -589,10 +596,10 @@ const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Pro
     e.preventDefault();
     await api.updateProduct(product.id, {
       ...formData,
-      quantity: Number(formData.quantity),
-      buying_price: Number(formData.buying_price),
-      selling_price: Number(formData.selling_price),
-      low_stock_threshold: Number(formData.low_stock_threshold),
+      quantity: Number(formData.quantity) || 0,
+      buying_price: Number(formData.buying_price) || 0,
+      selling_price: Number(formData.selling_price) || 0,
+      low_stock_threshold: Number(formData.low_stock_threshold) || 0,
     } as any);
     onUpdate();
     onClose();
@@ -682,8 +689,8 @@ const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Pro
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Qty</label>
                   <input 
-                    value={formData.quantity} 
-                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
+                    value={formData.quantity || 0} 
+                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) || 0 })}
                     type="number" 
                     className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
                   />
@@ -691,8 +698,8 @@ const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Pro
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Buy $</label>
                   <input 
-                    value={formData.buying_price} 
-                    onChange={(e) => setFormData({ ...formData, buying_price: Number(e.target.value) })}
+                    value={formData.buying_price || 0} 
+                    onChange={(e) => setFormData({ ...formData, buying_price: Number(e.target.value) || 0 })}
                     type="number" 
                     step="0.01" 
                     className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
@@ -701,8 +708,8 @@ const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Pro
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sell $</label>
                   <input 
-                    value={formData.selling_price} 
-                    onChange={(e) => setFormData({ ...formData, selling_price: Number(e.target.value) })}
+                    value={formData.selling_price || 0} 
+                    onChange={(e) => setFormData({ ...formData, selling_price: Number(e.target.value) || 0 })}
                     type="number" 
                     step="0.01" 
                     className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
@@ -713,7 +720,7 @@ const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Pro
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Batch #</label>
                   <input 
-                    value={formData.batch_number} 
+                    value={formData.batch_number || ''} 
                     onChange={(e) => setFormData({ ...formData, batch_number: e.target.value })}
                     className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
                   />
@@ -721,8 +728,8 @@ const EditProductModal = ({ product, isOpen, onClose, onUpdate }: { product: Pro
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Threshold</label>
                   <input 
-                    value={formData.low_stock_threshold} 
-                    onChange={(e) => setFormData({ ...formData, low_stock_threshold: Number(e.target.value) })}
+                    value={formData.low_stock_threshold || 0} 
+                    onChange={(e) => setFormData({ ...formData, low_stock_threshold: Number(e.target.value) || 0 })}
                     type="number" 
                     className="w-full p-3 bg-slate-50 border border-black/5 rounded-xl text-sm" 
                   />
@@ -755,10 +762,10 @@ const DashboardView = ({
   if (!data) return <div className="p-8 text-center text-slate-400">Loading dashboard...</div>;
 
   const stats = [
-    { label: '💰 Total Sales', value: `$${data.stats.totalSales.toFixed(2)}`, icon: TrendingUp, color: 'text-emerald-600' },
-    { label: '📈 Total Profit', value: `$${data.stats.totalProfit.toFixed(2)}`, icon: BarChart3, color: 'text-indigo-600' },
-    { label: '⚠️ Low Stock', value: data.stats.lowStock, icon: AlertTriangle, color: 'text-amber-600' },
-    { label: '🚫 Out of Stock', value: data.stats.outOfStock, icon: X, color: 'text-rose-600' },
+    { label: '💰 Total Sales', value: `$${(Number(data.stats.totalSales) || 0).toFixed(2)}`, icon: TrendingUp, color: 'text-emerald-600' },
+    { label: '📈 Total Profit', value: `$${(Number(data.stats.totalProfit) || 0).toFixed(2)}`, icon: BarChart3, color: 'text-indigo-600' },
+    { label: '⚠️ Low Stock', value: Number(data.stats.lowStock) || 0, icon: AlertTriangle, color: 'text-amber-600' },
+    { label: '🚫 Out of Stock', value: Number(data.stats.outOfStock) || 0, icon: X, color: 'text-rose-600' },
   ];
 
   return (
@@ -816,6 +823,8 @@ const DashboardView = ({
             { label: '📦 Add Stock', icon: Plus, color: 'bg-indigo-500', onClick: onAddProduct },
             { label: '👥 New User', icon: Users, color: 'bg-amber-500', onClick: onAddCustomer },
             { label: '📊 Reports', icon: BarChart3, color: 'bg-slate-800', onClick: () => onAction('reports') },
+            { label: '✨ Social', icon: Share2, color: 'bg-indigo-400', onClick: () => onAction('social') },
+            { label: '📜 Logs', icon: History, color: 'bg-slate-500', onClick: () => onAction('logs') },
           ].map((action, i) => (
             <button 
               key={i} 
@@ -837,20 +846,84 @@ const DashboardView = ({
 const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product[]; onAddProduct: () => void; onUpdate: () => void }) => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'All' | 'Avon' | 'Inuka' | 'Avroy Shlain'>('All');
+  const [showFilters, setShowFilters] = useState(false);
+  const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
+  const [stockLevel, setStockLevel] = useState<'All' | 'Low' | 'Out'>('All');
+  
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [sharingProduct, setSharingProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showBulkActions, setShowBulkActions] = useState(false);
 
-  const filtered = products.filter(p => 
-    (filter === 'All' || p.brand === filter) &&
-    (p.name.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase()))
-  );
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const handleBulkDelete = async () => {
+    if (confirm(`Delete ${selectedIds.length} products?`)) {
+      for (const id of selectedIds) {
+        await api.deleteProduct(id);
+      }
+      setSelectedIds([]);
+      onUpdate();
+    }
+  };
+
+  const filtered = products.filter(p => {
+    const matchesBrand = filter === 'All' || p.brand === filter;
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase());
+    const matchesPrice = p.selling_price >= priceRange.min && p.selling_price <= priceRange.max;
+    const matchesStock = stockLevel === 'All' || 
+                        (stockLevel === 'Low' && p.quantity <= p.low_stock_threshold && p.quantity > 0) ||
+                        (stockLevel === 'Out' && p.quantity === 0);
+    return matchesBrand && matchesSearch && matchesPrice && matchesStock;
+  });
+
+  const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const newProducts = results.data.map((row: any) => ({
+            name: row.name || 'Unnamed Product',
+            brand: row.brand || 'Inuka',
+            category: row.category || 'General',
+            quantity: Number(row.quantity) || 0,
+            buying_price: Number(row.buying_price) || 0,
+            selling_price: Number(row.selling_price) || 0,
+            low_stock_threshold: Number(row.low_stock_threshold) || 5,
+            supplier_name: row.supplier_name || '',
+            batch_number: row.batch_number || '',
+            image_url: row.image_url || '',
+          }));
+
+          for (const p of newProducts) {
+            await api.createProduct(p);
+          }
+          alert(`Successfully imported ${newProducts.length} products!`);
+          onUpdate();
+        } catch (err) {
+          console.error(err);
+          alert('Failed to import products. Check console for details.');
+        } finally {
+          setIsImporting(false);
+        }
+      }
+    });
+  };
 
   const handleShare = (product: Product) => {
     setSharingProduct(product);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this product?')) {
       await api.deleteProduct(id);
       onUpdate();
@@ -869,7 +942,7 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
         </button>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
@@ -880,7 +953,71 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <button 
+          onClick={() => setShowFilters(!showFilters)}
+          className={cn(
+            "p-2 rounded-xl border border-black/5 transition-colors",
+            showFilters ? "bg-slate-800 text-white" : "bg-white text-slate-600"
+          )}
+        >
+          <Filter size={20} />
+        </button>
+        <label className="p-2 bg-white border border-black/5 rounded-xl text-slate-600 cursor-pointer hover:bg-slate-50 transition-colors">
+          <input type="file" accept=".csv" className="hidden" onChange={handleCsvImport} disabled={isImporting} />
+          <FileUp size={20} className={isImporting ? "animate-bounce" : ""} />
+        </label>
       </div>
+
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <Card className="p-4 bg-slate-50 border-none space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Price Min ($)</label>
+                  <input 
+                    type="number" 
+                    value={priceRange.min}
+                    onChange={(e) => setPriceRange(prev => ({ ...prev, min: Number(e.target.value) }))}
+                    className="w-full p-2 bg-white rounded-lg text-xs border border-black/5"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Price Max ($)</label>
+                  <input 
+                    type="number" 
+                    value={priceRange.max}
+                    onChange={(e) => setPriceRange(prev => ({ ...prev, max: Number(e.target.value) }))}
+                    className="w-full p-2 bg-white rounded-lg text-xs border border-black/5"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Stock Availability</label>
+                <div className="flex gap-2">
+                  {['All', 'Low', 'Out'].map((l) => (
+                    <button
+                      key={l}
+                      onClick={() => setStockLevel(l as any)}
+                      className={cn(
+                        "flex-1 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-colors",
+                        stockLevel === l ? "bg-indigo-600 text-white" : "bg-white text-slate-500 border border-black/5"
+                      )}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
         {['All', 'Avon', 'Inuka', 'Avroy Shlain'].map((f) => (
@@ -898,50 +1035,210 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
       </div>
 
       <div className="grid gap-3">
-        {filtered.map((product) => (
-          <Card key={product.id} className="p-3 flex items-center gap-3">
-            <div 
-              className="w-14 h-14 bg-slate-100 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer"
-              onClick={() => setSelectedProduct(product)}
-            >
-              {product.image_url ? (
-                <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-slate-400">
-                  <Package size={24} />
-                </div>
+        {filtered.map((product) => {
+          const isSelected = selectedIds.includes(product.id);
+          return (
+            <Card 
+              key={product.id} 
+              className={cn(
+                "p-3 flex items-center gap-3 transition-colors relative",
+                isSelected ? "border-indigo-600 bg-indigo-50/30" : ""
               )}
-            </div>
-            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedProduct(product)}>
-              <div className="flex items-center justify-between mb-0.5">
-                <h4 className="font-bold text-sm truncate">{product.name}</h4>
-                <Badge variant={product.quantity === 0 ? 'danger' : product.quantity <= product.low_stock_threshold ? 'warning' : 'success'}>
-                  {product.quantity} in stock
-                </Badge>
-              </div>
-              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">
-                {product.brand} • {product.category}
-              </p>
-              <div className="flex items-center justify-between">
-                <span className="text-indigo-600 font-bold text-sm">${product.selling_price.toFixed(2)}</span>
-                <span className="text-[10px] text-slate-400 font-medium">Batch: {product.batch_number}</span>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button onClick={() => handleShare(product)} className="p-1.5 text-slate-400 hover:text-indigo-600"><Share2 size={16} /></button>
+            >
               <button 
-                onClick={() => {
-                  setEditingProduct(product);
-                }} 
-                className="p-1.5 text-slate-400 hover:text-amber-600"
+                onClick={() => toggleSelect(product.id)}
+                className={cn(
+                  "w-5 h-5 rounded border flex items-center justify-center transition-colors flex-shrink-0",
+                  isSelected ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 bg-white"
+                )}
               >
-                <Edit size={16} />
+                {isSelected && <CheckCircle2 size={12} />}
               </button>
-              <button onClick={() => handleDelete(product.id)} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={16} /></button>
-            </div>
-          </Card>
-        ))}
+              <div 
+                className="w-14 h-14 bg-slate-100 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer"
+                onClick={() => isSelected ? toggleSelect(product.id) : setSelectedProduct(product)}
+              >
+                {product.image_url ? (
+                  <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-slate-400">
+                    <Package size={24} />
+                  </div>
+                )}
+              </div>
+              <div 
+                className="flex-1 min-w-0 cursor-pointer" 
+                onClick={() => isSelected ? toggleSelect(product.id) : setSelectedProduct(product)}
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <h4 className="font-bold text-sm truncate">{product.name}</h4>
+                  <Badge variant={product.quantity === 0 ? 'danger' : product.quantity <= product.low_stock_threshold ? 'warning' : 'success'}>
+                    {product.quantity} in stock
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">
+                  {product.brand} • {product.category}
+                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-indigo-600 font-bold text-sm">${product.selling_price.toFixed(2)}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Batch: {product.batch_number}</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button onClick={() => handleShare(product)} className="p-1.5 text-slate-400 hover:text-indigo-600"><Share2 size={16} /></button>
+                <button 
+                  onClick={() => {
+                    setEditingProduct(product);
+                  }} 
+                  className="p-1.5 text-slate-400 hover:text-amber-600"
+                >
+                  <Edit size={16} />
+                </button>
+                <button onClick={() => handleDelete(product.id)} className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={16} /></button>
+              </div>
+            </Card>
+          );
+        })}
       </div>
+
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-20 left-4 right-4 z-[65]"
+          >
+            <Card className="p-4 bg-slate-900 border-none shadow-2xl flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
+                  {selectedIds.length}
+                </div>
+                <span className="text-white text-sm font-bold">Items selected</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setSelectedIds([])}
+                  className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white transition-colors"
+                >
+                  Clear
+                </button>
+                <div className="h-4 w-px bg-slate-700 mx-1" />
+                <button 
+                  onClick={() => setShowBulkActions(true)}
+                  className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-900/50"
+                >
+                  Actions
+                </button>
+                <button 
+                  onClick={handleBulkDelete}
+                  className="p-2 text-rose-400 hover:text-rose-300 transition-colors"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showBulkActions && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[70] p-4 flex items-center justify-center"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-3xl p-6 space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-black">⚡ Bulk Actions</h3>
+                <button onClick={() => setShowBulkActions(false)} className="p-2 bg-slate-100 rounded-full"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Update Brand</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Avon', 'Inuka', 'Avroy Shlain'].map(b => (
+                      <button
+                        key={b}
+                        onClick={async () => {
+                          for (const id of selectedIds) {
+                            await api.updateProduct(id, { brand: b as any });
+                          }
+                          setSelectedIds([]);
+                          setShowBulkActions(false);
+                          onUpdate();
+                        }}
+                        className="p-2 bg-slate-50 hover:bg-indigo-50 border border-black/5 rounded-xl text-[10px] font-bold transition-colors"
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Stock Adjustment</label>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={async () => {
+                        const amount = Number(prompt('Add how many units to each?', '5'));
+                        if (amount) {
+                          for (const id of selectedIds) {
+                            const p = products.find(x => x.id === id);
+                            if (p) {
+                              await api.updateProduct(id, { quantity: p.quantity + amount });
+                            }
+                          }
+                          setSelectedIds([]);
+                          setShowBulkActions(false);
+                          onUpdate();
+                        }
+                      }}
+                      className="flex-1 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100"
+                    >
+                      + Add Stock
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        const amount = Number(prompt('Deduct how many units from each?', '1'));
+                        if (amount) {
+                          for (const id of selectedIds) {
+                            const p = products.find(x => x.id === id);
+                            if (p && p.quantity >= amount) {
+                              await api.updateProduct(id, { quantity: p.quantity - amount });
+                            }
+                          }
+                          setSelectedIds([]);
+                          setShowBulkActions(false);
+                          onUpdate();
+                        }
+                      }}
+                      className="flex-1 py-2 bg-rose-50 text-rose-700 rounded-xl text-xs font-bold border border-rose-100"
+                    >
+                      - Subtract
+                    </button>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setShowBulkActions(false)}
+                  className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm shadow-xl"
+                >
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {selectedProduct && (
@@ -1037,13 +1334,13 @@ const InventoryView = ({ products, onAddProduct, onUpdate }: { products: Product
 };
 
 const SalesView = ({ products, customers, onSaleComplete }: { products: Product[]; customers: Customer[]; onSaleComplete: () => void }) => {
-  const [cart, setCart] = useState<{ product_id: number; quantity: number }[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | ''>('');
+  const [cart, setCart] = useState<{ product_id: string; quantity: number }[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [search, setSearch] = useState('');
   const [completedSale, setCompletedSale] = useState<any | null>(null);
 
-  const addToCart = (productId: number) => {
+  const addToCart = (productId: string) => {
     setCart(prev => {
       const existing = prev.find(item => item.product_id === productId);
       if (existing) {
@@ -1053,11 +1350,11 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
     });
   };
 
-  const removeFromCart = (productId: number) => {
+  const removeFromCart = (productId: string) => {
     setCart(prev => prev.filter(item => item.product_id !== productId));
   };
 
-  const updateQuantity = (productId: number, delta: number) => {
+  const updateQuantity = (productId: string, delta: number) => {
     setCart(prev => prev.map(item => {
       if (item.product_id === productId) {
         const newQty = Math.max(1, item.quantity + delta);
@@ -1075,11 +1372,24 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
   const handleCheckout = async () => {
     if (!selectedCustomerId || cart.length === 0) return;
     try {
+      const totalAmount = cart.reduce((sum, item) => {
+        const p = products.find(prod => prod.id === item.product_id);
+        return sum + (p ? (Number(p.selling_price) || 0) * item.quantity : 0);
+      }, 0);
+
+      const totalProfit = cart.reduce((sum, item) => {
+        const p = products.find(prod => prod.id === item.product_id);
+        const profit = p ? ((Number(p.selling_price) || 0) - (Number(p.buying_price) || 0)) * item.quantity : 0;
+        return sum + profit;
+      }, 0);
+
       const result = await api.createSale({
-        customer_id: Number(selectedCustomerId),
+        customer_id: selectedCustomerId,
         items: cart,
+        total_amount: totalAmount,
+        total_profit: totalProfit,
         payment_method: paymentMethod,
-        assistant_id: 1 // Mocked for now
+        assistant_id: "1" // Mocked for now
       });
       
       // Store current cart and customer for receipt before clearing
@@ -1106,7 +1416,7 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
         <select 
           className="w-full p-3 bg-white border border-black/5 rounded-xl text-sm focus:outline-none"
           value={selectedCustomerId}
-          onChange={(e) => setSelectedCustomerId(Number(e.target.value))}
+          onChange={(e) => setSelectedCustomerId(e.target.value)}
         >
           <option value="">Select Customer</option>
           {customers.map(c => (
@@ -1197,24 +1507,99 @@ const SalesView = ({ products, customers, onSaleComplete }: { products: Product[
 
 const ReportsView = ({ sales }: { sales: Sale[] }) => {
   const [performance, setPerformance] = useState<PerformanceReport | null>(null);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [newSchedule, setNewSchedule] = useState({ type: 'daily', email: '' });
 
   useEffect(() => {
     api.getPerformanceReport().then(setPerformance);
+    api.getReportSchedules().then(setSchedules);
   }, []);
 
-  const totalRevenue = sales.reduce((sum, s) => sum + s.total_amount, 0);
-  const totalProfit = sales.reduce((sum, s) => sum + s.total_profit, 0);
+  const handleAddSchedule = async () => {
+    if (!newSchedule.email) return;
+    await api.createReportSchedule(newSchedule);
+    api.getReportSchedules().then(setSchedules);
+    setShowScheduleForm(false);
+    setNewSchedule({ type: 'daily', email: '' });
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    await api.deleteReportSchedule(id);
+    api.getReportSchedules().then(setSchedules);
+  };
+
+  const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
+  const totalProfit = sales.reduce((sum, s) => sum + (Number(s.total_profit) || 0), 0);
 
   const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   const handleShareReceipt = (sale: Sale) => {
-    const text = `🧾 RECEIPT - SmartStock Beauty Tracker\n\nCustomer: ${sale.customer_name || 'Walk-in'}\nDate: ${new Date(sale.sale_date).toLocaleString()}\n\nTotal Paid: $${sale.total_amount.toFixed(2)}\nPayment: ${sale.payment_method}\n\nThank you for shopping with us! ✨`;
+    const saleDate = sale.sale_date?.toDate ? sale.sale_date.toDate() : new Date(sale.sale_date);
+    const text = `🧾 RECEIPT - SmartStock Beauty Tracker\n\nCustomer: ${sale.customer_name || 'Walk-in'}\nDate: ${saleDate.toLocaleString()}\n\nTotal Paid: $${(Number(sale.total_amount) || 0).toFixed(2)}\nPayment: ${sale.payment_method}\n\nThank you for shopping with us! ✨`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-black px-1">📊 Performance Report</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-black px-1">📊 Reports</h2>
+        <button 
+          onClick={() => setShowScheduleForm(!showScheduleForm)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 text-white rounded-xl text-xs font-bold"
+        >
+          <CalendarIcon size={14} /> Schedule
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {showScheduleForm && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <Card className="p-4 bg-indigo-50 border-none space-y-3">
+              <h4 className="text-xs font-black uppercase text-indigo-600">New Email Schedule</h4>
+              <div className="flex gap-2">
+                <select 
+                  className="flex-1 p-2 rounded-lg text-xs border border-black/5"
+                  value={newSchedule.type}
+                  onChange={(e) => setNewSchedule(prev => ({ ...prev, type: e.target.value }))}
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+                <input 
+                  type="email" 
+                  placeholder="admin@example.com"
+                  className="flex-[2] p-2 rounded-lg text-xs border border-black/5"
+                  value={newSchedule.email}
+                  onChange={(e) => setNewSchedule(prev => ({ ...prev, email: e.target.value }))}
+                />
+                <button 
+                  onClick={handleAddSchedule}
+                  className="px-4 bg-indigo-600 text-white rounded-lg text-xs font-bold"
+                >
+                  Save
+                </button>
+              </div>
+              <div className="space-y-1">
+                {schedules.map(s => (
+                  <div key={s.id} className="flex items-center justify-between bg-white/50 p-2 rounded-lg text-[10px]">
+                    <span className="font-bold uppercase text-slate-500">{s.type}</span>
+                    <span className="text-slate-600 truncate px-2">{s.email}</span>
+                    <button onClick={() => handleDeleteSchedule(s.id)} className="text-rose-500 hover:scale-110 active:scale-90 transition-transform"><Trash2 size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4 bg-indigo-600 text-white">
           <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Revenue</p>
@@ -1277,26 +1662,29 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
       <div className="space-y-3">
         <h3 className="text-sm font-bold px-1">📜 Recent Transactions</h3>
         <div className="space-y-2">
-          {sales.map(sale => (
-            <Card key={sale.id} className="p-3 flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="font-bold text-sm truncate">{sale.customer_name || 'Walk-in Customer'}</p>
-                <p className="text-[10px] text-slate-400 font-medium">{new Date(sale.sale_date).toLocaleDateString()} • {sale.payment_method}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className="font-black text-sm text-slate-900">${sale.total_amount.toFixed(2)}</p>
-                  <p className="text-[10px] text-emerald-600 font-bold">Profit: ${sale.total_profit.toFixed(2)}</p>
+          {sales.map(sale => {
+            const saleDate = sale.sale_date?.toDate ? sale.sale_date.toDate() : new Date(sale.sale_date);
+            return (
+              <Card key={sale.id} className="p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="font-bold text-sm truncate">{sale.customer_name || 'Walk-in Customer'}</p>
+                  <p className="text-[10px] text-slate-400 font-medium">{saleDate.toLocaleDateString()} • {sale.payment_method}</p>
                 </div>
-                <button 
-                  onClick={() => handleShareReceipt(sale)}
-                  className="p-2 text-slate-300 hover:text-emerald-600 transition-colors"
-                >
-                  <Share2 size={18} />
-                </button>
-              </div>
-            </Card>
-          ))}
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="font-black text-sm text-slate-900">${(Number(sale.total_amount) || 0).toFixed(2)}</p>
+                    <p className="text-[10px] text-emerald-600 font-bold">Profit: ${(Number(sale.total_profit) || 0).toFixed(2)}</p>
+                  </div>
+                  <button 
+                    onClick={() => handleShareReceipt(sale)}
+                    className="p-2 text-slate-300 hover:text-emerald-600 transition-colors"
+                  >
+                    <Share2 size={18} />
+                  </button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1305,20 +1693,24 @@ const ReportsView = ({ sales }: { sales: Sale[] }) => {
 
 const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Customer[]; onAddCustomer: () => void; onUpdate: () => void }) => {
   const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'All' | 'Loyalty' | 'New'>('All');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [history, setHistory] = useState<any[]>([]);
 
-  const filtered = customers.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) || 
-    c.phone.includes(search)
-  );
+  const filtered = customers.filter(c => {
+    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search);
+    const matchesFilter = filter === 'All' || 
+                         (filter === 'Loyalty' && (Number(c.loyalty_points) || 0) > 100) ||
+                         (filter === 'New' && !c.total_spent);
+    return matchesSearch && matchesFilter;
+  });
 
-  const fetchHistory = async (id: number) => {
+  const fetchHistory = async (id: string) => {
     const data = await api.getCustomerHistory(id);
     setHistory(data);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this customer?')) {
       await api.deleteCustomer(id);
       onUpdate();
@@ -1350,6 +1742,21 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
         </div>
       </div>
 
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        {['All', 'Loyalty', 'New'].map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f as any)}
+            className={cn(
+              "px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors",
+              filter === f ? "bg-slate-800 text-white" : "bg-white text-slate-600 border border-black/5"
+            )}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-3">
         {filtered.map((customer) => (
           <Card key={customer.id} className="p-4 flex items-center gap-4">
@@ -1371,10 +1778,13 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
             >
               <h4 className="font-bold text-sm truncate">{customer.name}</h4>
               <p className="text-xs text-slate-500">{customer.phone}</p>
-              <div className="mt-1">
-                <Badge variant={customer.category === 'VIP' ? 'success' : 'default'}>
-                  {customer.category}
-                </Badge>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="flex items-center gap-1 bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[8px] font-black uppercase">
+                  <Sparkles size={10} /> {Number(customer.loyalty_points) || 0} pts
+                </div>
+                <div className="text-[8px] font-bold text-slate-400 uppercase">
+                  Spent: ${(Number(customer.total_spent) || 0).toFixed(2)}
+                </div>
               </div>
             </div>
             <div className="flex gap-2">
@@ -1474,12 +1884,65 @@ const CustomersView = ({ customers, onAddCustomer, onUpdate }: { customers: Cust
   );
 };
 
+const StockLogsView = () => {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    api.getStockLogs().then(data => {
+      setLogs(data);
+      setIsLoading(false);
+    });
+  }, []);
+
+  if (isLoading) return <div className="p-8 text-center text-slate-400">Loading logs...</div>;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black tracking-tight flex items-center gap-2">
+        <History size={20} /> Stock Adjustment Log
+      </h2>
+      
+      <div className="space-y-2">
+        {logs.map(log => {
+          const date = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.timestamp);
+          return (
+            <Card key={log.id} className="p-3">
+              <div className="flex justify-between items-start mb-1">
+                <span className={cn(
+                  "text-[8px] font-black uppercase px-1.5 py-0.5 rounded",
+                  log.type === 'addition' ? "bg-emerald-100 text-emerald-700" : 
+                  log.type === 'subtraction' ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
+                )}>
+                  {log.type}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">{date.toLocaleString()}</span>
+              </div>
+              <h4 className="text-sm font-bold">{log.product_name}</h4>
+              <div className="flex justify-between items-end mt-1">
+                <div className="text-[10px] text-slate-500">
+                  <span className="font-bold">{log.previous_quantity}</span> → <span className="font-bold text-slate-900">{log.new_quantity}</span>
+                  <p className="mt-0.5 italic">By: {log.user_name}</p>
+                </div>
+                <div className="text-[10px] bg-slate-100 px-2 py-0.5 rounded-full font-bold">
+                  {log.reason}
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+        {logs.length === 0 && <div className="p-8 text-center text-slate-400">No logs found</div>}
+      </div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
   console.log('App component rendering...');
   const { user, loading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'sales' | 'customers' | 'reports' | 'social'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'sales' | 'customers' | 'reports' | 'social' | 'logs'>('dashboard');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1548,6 +2011,7 @@ export default function App() {
       case 'customers': return <CustomersView customers={customers} onAddCustomer={() => setShowAddCustomer(true)} onUpdate={fetchData} />;
       case 'reports': return <ReportsView sales={sales} />;
       case 'social': return <SocialPostsView />;
+      case 'logs': return <StockLogsView />;
       default: return <div className="p-8 text-center text-slate-400">Coming Soon</div>;
     }
   };
@@ -1621,7 +2085,7 @@ export default function App() {
             { id: 'inventory', icon: Package, label: '📦 Stock' },
             { id: 'sales', icon: ShoppingCart, label: '🛍️ Sell' },
             { id: 'customers', icon: Users, label: '👥 Users' },
-            { id: 'social', icon: Share2, label: '✨ Social' },
+            { id: 'logs', icon: History, label: '📜 Logs' },
             { id: 'reports', icon: BarChart3, label: '📊 Stats' },
           ].map((tab) => (
             <button
@@ -1665,10 +2129,10 @@ export default function App() {
                 await api.createProduct({
                   ...data,
                   image_url: newProductImageUrl || (data.image_url as string),
-                  quantity: Number(data.quantity),
-                  buying_price: Number(data.buying_price),
-                  selling_price: Number(data.selling_price),
-                  low_stock_threshold: Number(data.low_stock_threshold),
+                  quantity: Number(data.quantity) || 0,
+                  buying_price: Number(data.buying_price) || 0,
+                  selling_price: Number(data.selling_price) || 0,
+                  low_stock_threshold: Number(data.low_stock_threshold) || 0,
                 } as any);
                 setShowAddProduct(false);
                 setNewProductImageUrl('');

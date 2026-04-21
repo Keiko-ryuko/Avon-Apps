@@ -1,6 +1,6 @@
 {
   "name": "SmartStock Beauty Tracker",
-  "description": "A comprehensive inventory and sales management system for beauty products, featuring real-time stock tracking, sales analytics, and customer management.",
+  "description": "A comprehensive beauty inventory system with real-time stock logs, bulk CSV import, customer loyalty points, and automated recurring sales reports.",
   "requestFramePermissions": [
     "camera"
   ]

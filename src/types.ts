@@ -1,5 +1,5 @@
 export interface Product {
-  id: number;
+  id: string;
   name: string;
   brand: 'Avon' | 'Inuka' | 'Avroy Shlain';
   category: string;
@@ -15,8 +15,8 @@ export interface Product {
 }
 
 export interface SocialPost {
-  id: number;
-  product_id: number;
+  id: string;
+  product_id: string;
   product_name?: string;
   product_brand?: string;
   platform: string;
@@ -27,23 +27,51 @@ export interface SocialPost {
 }
 
 export interface Customer {
-  id: number;
+  id: string;
   name: string;
   phone: string;
   email: string;
   address: string;
   category: string;
+  loyalty_points: number;
+  total_spent: number;
+}
+
+export interface StockLog {
+  id: string;
+  product_id: string;
+  product_name: string;
+  type: 'addition' | 'subtraction' | 'edit';
+  quantity_changed: number;
+  previous_quantity: number;
+  new_quantity: number;
+  user_id: string;
+  user_name: string;
+  timestamp: any;
+  reason?: string;
+}
+
+export interface ReportSchedule {
+  id: string;
+  type: 'daily' | 'weekly' | 'monthly';
+  email: string;
+  last_sent?: any;
+  created_at: any;
+  uid: string;
 }
 
 export interface Sale {
-  id: number;
-  customer_id: number;
+  id: string;
+  customer_id: string;
   customer_name?: string;
   total_amount: number;
   total_profit: number;
   payment_method: string;
-  assistant_id: number;
-  sale_date: string;
+  assistant_id: string;
+  sale_date: any;
+  items?: { product_id: string; quantity: number }[];
+  points_earned?: number;
+  points_redeemed?: number;
 }
 
 export interface DashboardData {
@@ -58,7 +86,7 @@ export interface DashboardData {
 }
 
 export interface Notification {
-  id: number;
+  id: string;
   type: string;
   message: string;
   is_read: number;
@@ -66,7 +94,7 @@ export interface Notification {
 }
 
 export interface User {
-  id: number;
+  id: string;
   username: string;
   role: 'admin' | 'assistant' | 'viewer';
 }

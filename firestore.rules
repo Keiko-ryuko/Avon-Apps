@@ -47,6 +47,8 @@ service cloud.firestore {
     //   - total_amount: number (required)
     //   - total_profit: number (required)
     //   - payment_method: string (required)
+    //   - assistant_id: string (required)
+    //   - items: list (required)
     //   - uid: string (required)
     //
     // Collection: notifications
@@ -64,6 +66,24 @@ service cloud.firestore {
     //   - platform: string (required)
     //   - caption: string (required)
     //   - status: string (required, enum: ['posted', 'scheduled'])
+    //   - uid: string (required)
+    //
+    // Collection: stock_logs
+    // Document ID: {logId}
+    // Fields:
+    //   - product_id: string (required)
+    //   - product_name: string (required)
+    //   - type: string (required, addition/subtraction/edit)
+    //   - quantity_changed: number (required)
+    //   - previous_quantity: number (required)
+    //   - new_quantity: number (required)
+    //   - uid: string (required)
+    //
+    // Collection: report_schedules
+    // Document ID: {scheduleId}
+    // Fields:
+    //   - type: string (required, daily/weekly/monthly)
+    //   - email: string (required)
     //   - uid: string (required)
     //
     // ===============================================================
@@ -121,10 +141,12 @@ service cloud.firestore {
     }
 
     function isValidSale(data) {
-      return data.keys().hasAll(['customer_id', 'total_amount', 'total_profit', 'payment_method', 'uid']) &&
+      return data.keys().hasAll(['customer_id', 'total_amount', 'total_profit', 'payment_method', 'assistant_id', 'items', 'uid']) &&
              data.total_amount is number && data.total_amount >= 0 &&
              data.total_profit is number &&
              data.payment_method is string &&
+             data.assistant_id is string &&
+             data.items is list &&
              data.uid is string && data.uid == request.auth.uid;
     }
 
@@ -141,6 +163,19 @@ service cloud.firestore {
              data.platform is string &&
              data.caption is string &&
              data.status in ['posted', 'scheduled'] &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    function isValidStockLog(data) {
+      return data.keys().hasAll(['product_id', 'product_name', 'type', 'quantity_changed', 'previous_quantity', 'new_quantity', 'uid']) &&
+             data.type in ['addition', 'subtraction', 'edit'] &&
+             data.uid is string && data.uid == request.auth.uid;
+    }
+
+    function isValidReportSchedule(data) {
+      return data.keys().hasAll(['type', 'email', 'uid']) &&
+             data.type in ['daily', 'weekly', 'monthly'] &&
+             isValidEmail(data.email) &&
              data.uid is string && data.uid == request.auth.uid;
     }
 
@@ -187,6 +222,17 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
       allow create: if isAuthenticated() && isValidSocialPost(request.resource.data);
       allow update: if isAuthenticated() && isValidSocialPost(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /stock_logs/{logId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidStockLog(request.resource.data);
+    }
+
+    match /report_schedules/{scheduleId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidReportSchedule(request.resource.data);
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
   }

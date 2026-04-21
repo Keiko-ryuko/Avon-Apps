@@ -56,6 +56,10 @@
         "total_amount": { "type": "number", "description": "The total amount of the sale" },
         "total_profit": { "type": "number", "description": "The total profit of the sale" },
         "payment_method": { "type": "string", "description": "The payment method used" },
+        "items": {
+          "type": "array",
+          "description": "The items included in the sale"
+        },
         "uid": { "type": "string", "description": "The user ID who owns this sale" }
       },
       "required": ["customer_id", "total_amount", "total_profit", "payment_method", "uid"]
